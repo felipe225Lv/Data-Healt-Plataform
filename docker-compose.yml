@@ -1,0 +1,29 @@
+# Ambiente de ejecución de Data Health Platform.
+# - En local:   docker compose up -d --build
+# - En el pipeline: el job "deploy" carga las imágenes construidas y define API_IMAGE / WEB_IMAGE.
+
+services:
+  api:
+    image: ${API_IMAGE:-dhp-api:local}
+    build: ./backend
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-dhp-secreto-solo-para-desarrollo}
+      FERNET_KEY: ${FERNET_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ALERT_RECIPIENTS: ${ALERT_RECIPIENTS:-datos@dhp.test}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:-dhp-web:local}
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

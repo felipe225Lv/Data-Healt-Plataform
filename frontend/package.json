@@ -1,0 +1,15 @@
+{
+  "name": "dhp-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard web de Data Health Platform (JavaScript sin dependencias externas)",
+  "type": "module",
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

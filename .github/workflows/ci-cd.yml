@@ -1,0 +1,276 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Data Health Platform (DHP) · Pipeline CI/CD con GitHub Actions
+# Cristian Felipe Lopez · Esteban Pineda Ardila
+#
+# Flujo (igual al definido en el documento del pipeline):
+#   1. Trigger: push a main/develop, pull request o ejecución manual
+#   2. Job "backend-tests":  checkout → Python → dependencias → ruff → PRUEBAS UNITARIAS
+#   3. Job "frontend-build": checkout → Node → npm ci → lint → build → pruebas JS
+#   4. Job "docker-images":  build de las imágenes api y web (solo si 2 y 3 pasaron)
+#   5. Job "deploy":         despliegue con Docker Compose + pruebas de humo
+#
+# Si una prueba unitaria falla o la cobertura baja de 80 %, el pipeline se
+# detiene en el job 2 y los jobs 4 y 5 quedan omitidos (no se despliega).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: DHP CI/CD
+
+# ── 1. TRIGGER ───────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: dhp-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1 · BACKEND: dependencias + lint + pruebas unitarias
+  # ───────────────────────────────────────────────────────────────────────────
+  backend-tests:
+    name: "Backend · Pruebas unitarias"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Análisis de estilo (ruff)
+        run: ruff check app tests
+
+      # ── PRUEBAS UNITARIAS (CP-01 a CP-25 del Plan de Pruebas) ─────────────
+      - name: Ejecutar pruebas unitarias
+        run: |
+          pytest tests/unit \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            --cov-fail-under=80 \
+            --junitxml=reports/junit.xml \
+            -v
+
+      - name: Resumen de resultados
+        if: always()
+        run: python ../scripts/test_summary.py reports/junit.xml coverage.xml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar reportes de pruebas y cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-pruebas-backend
+          path: |
+            backend/coverage.xml
+            backend/htmlcov/
+            backend/reports/junit.xml
+          retention-days: 30
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2 · FRONTEND: dependencias + lint + compilación + pruebas JS
+  # ───────────────────────────────────────────────────────────────────────────
+  frontend-build:
+    name: "Frontend · Build del dashboard"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Compilar dashboard
+        run: npm run build
+
+      - name: Pruebas del frontend
+        run: npm test
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3 · IMÁGENES DOCKER (solo si los jobs 1 y 2 pasaron)
+  # Se guardan como artefacto para el despliegue y, si el repositorio lo
+  # permite, también se publican en GitHub Container Registry (GHCR).
+  # ───────────────────────────────────────────────────────────────────────────
+  docker-images:
+    name: "Docker · Build (${{ matrix.service }})"
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-build]
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        include:
+          - service: api
+            context: backend
+          - service: web
+            context: frontend
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Nombre de la imagen en GHCR (minúsculas)
+        run: |
+          echo "GHCR_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.service }}" >> "$GITHUB_ENV"
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Etiquetas de la imagen
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            dhp-${{ matrix.service }}
+            ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=ci
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Construir imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Exportar imagen para el despliegue
+        run: docker save dhp-${{ matrix.service }}:ci -o imagen-${{ matrix.service }}.tar
+
+      - name: Guardar imagen como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: imagen-${{ matrix.service }}
+          path: imagen-${{ matrix.service }}.tar
+          retention-days: 7
+
+      - name: Publicar en GHCR
+        continue-on-error: true
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push --all-tags "$GHCR_IMAGE"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4 · DESPLIEGUE AL AMBIENTE DE RUNTIME
+  # develop → staging · main → production
+  # El ambiente se levanta con Docker Compose en el runner y se valida con
+  # pruebas de humo. Si se configuran los secretos SSH_*, además se despliega
+  # en un servidor remoto.
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: "Deploy · ${{ github.ref_name == 'main' && 'production' || 'staging' }}"
+    runs-on: ubuntu-latest
+    needs: docker-images
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    env:
+      API_IMAGE: dhp-api:ci
+      WEB_IMAGE: dhp-web:ci
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Descargar imágenes construidas
+        uses: actions/download-artifact@v4
+        with:
+          pattern: imagen-*
+          merge-multiple: true
+
+      - name: Cargar imágenes en Docker
+        run: |
+          docker load -i imagen-api.tar
+          docker load -i imagen-web.tar
+          docker image ls | grep dhp-
+
+      - name: Desplegar con Docker Compose
+        run: docker compose up -d --no-build --wait --wait-timeout 120
+
+      - name: Pruebas de humo
+        run: bash scripts/smoke_test.sh http://localhost:8080
+
+      - name: Logs del ambiente
+        if: always()
+        run: docker compose logs --tail=60
+
+      - name: Despliegue remoto por SSH (opcional)
+        if: env.SSH_HOST != ''
+        uses: appleboy/ssh-action@v1
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          REPO: ${{ github.repository }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/dhp' }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: IMAGE_TAG,REPO,GHCR_USER,GHCR_TOKEN,DEPLOY_PATH
+          script_stop: true
+          script: |
+            set -e
+            cd "$DEPLOY_PATH"
+            REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+            export API_IMAGE="ghcr.io/${REPO_LC}-api:${IMAGE_TAG:0:11}"
+            export WEB_IMAGE="ghcr.io/${REPO_LC}-web:${IMAGE_TAG:0:11}"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose pull
+            docker compose up -d --no-build --wait
+            docker image prune -f
+
+      - name: Resultado del despliegue
+        if: always()
+        run: |
+          {
+            echo "### Despliegue ${{ job.status }}"
+            echo "- Ambiente: ${{ github.ref_name == 'main' && 'production' || 'staging' }}"
+            echo "- Rama: ${{ github.ref_name }}"
+            echo "- Commit: ${GITHUB_SHA::7}"
+            if [ -n "$SSH_HOST" ]; then echo "- Servidor remoto: sí"; else echo "- Servidor remoto: no configurado (ambiente en el runner)"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

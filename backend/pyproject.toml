@@ -1,0 +1,34 @@
+[project]
+name = "data-health-platform"
+version = "1.0.0"
+description = "Observabilidad y alertas de calidad de datos para pymes"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+# La cobertura se mide sobre la lógica de negocio (Plan de Pruebas, criterio de salida):
+# capa de servicios, motor de calidad y núcleo. Se excluye la capa web y la infraestructura.
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "app/main.py",
+    "app/api/*",
+    "app/repositories/*",
+    "app/infra/*",
+    "app/core/security.py",
+    "app/container.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]

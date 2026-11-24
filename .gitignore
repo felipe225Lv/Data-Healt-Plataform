@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+backend/htmlcov/
+backend/coverage.xml
+backend/reports/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Entorno
+.env
+*.tar

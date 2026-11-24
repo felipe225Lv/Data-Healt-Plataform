@@ -1,0 +1,6 @@
+# Solo para pruebas y calidad de código (no van en la imagen Docker)
+pytest==8.3.3
+pytest-cov==5.0.0
+pytest-mock==3.14.0
+freezegun==1.5.1
+ruff==0.6.9

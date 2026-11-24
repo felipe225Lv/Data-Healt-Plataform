@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Health Platform</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Data Health Platform</strong>
+    <span id="user-info"></span>
+    <button id="logout" class="link" hidden>Salir</button>
+  </header>
+
+  <main>
+    <section id="login-view" class="card login">
+      <h1>Iniciar sesión</h1>
+      <form id="login-form">
+        <label>Correo <input type="email" name="email" value="analista@dhp.test" required></label>
+        <label>Contraseña <input type="password" name="password" value="Analista#2026" required></label>
+        <button type="submit">Entrar</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+      <p class="hint">Usuarios de prueba: admin@dhp.test / Admin#2026 · analista@dhp.test / Analista#2026 · negocio@dhp.test / Negocio#2026</p>
+    </section>
+
+    <section id="dashboard-view" hidden>
+      <div class="kpis">
+        <div class="card kpi"><span>Validaciones ejecutadas</span><b id="kpi-validations">-</b></div>
+        <div class="card kpi"><span>Incidentes abiertos</span><b id="kpi-incidents">-</b></div>
+        <div class="card kpi"><span>Fuentes monitoreadas</span><b id="kpi-sources">-</b></div>
+      </div>
+
+      <h2>Estado por fuente</h2>
+      <table>
+        <thead><tr><th>Fuente</th><th>Tipo</th><th>Conjuntos</th><th>Reglas</th><th>Cumplimiento</th><th>Incidentes</th></tr></thead>
+        <tbody id="sources-body"></tbody>
+      </table>
+
+      <h2>Reglas de calidad</h2>
+      <table>
+        <thead><tr><th>Regla</th><th>Umbral</th><th>Último valor</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="rules-body"></tbody>
+      </table>
+
+      <h2>Incidentes</h2>
+      <table>
+        <thead><tr><th>#</th><th>Conjunto</th><th>Tipo</th><th>Detectado</th><th>Estado</th><th>Detalle</th></tr></thead>
+        <tbody id="incidents-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer>Versión <span id="build-version">dev</span></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
