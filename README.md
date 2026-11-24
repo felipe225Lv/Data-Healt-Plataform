@@ -110,3 +110,5 @@ Cada función de prueba empieza por `test_cpXX_` para identificar el caso del pl
 | negocio@dhp.test | Negocio#2026 | NEGOCIO |
 
 Los datos se guardan en memoria y se reinician con el contenedor.
+
+prueba 1

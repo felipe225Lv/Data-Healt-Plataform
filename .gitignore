@@ -8,6 +8,7 @@ venv/
 backend/htmlcov/
 backend/coverage.xml
 backend/reports/
+.coverage
 
 # Node
 node_modules/
